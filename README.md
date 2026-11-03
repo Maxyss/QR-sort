@@ -2,7 +2,21 @@
 
 Cada sorteo tiene su propio código QR. Los participantes lo escanean y se inscriben (nombre + email o teléfono). Vos entrás a `/admin`, ves los inscriptos, sorteás y creás sorteos nuevos.
 
-## Cómo desplegarlo en Render
+## 1. Subirlo a GitHub
+
+```bash
+cd sorteos-qr
+git init
+git add .
+git commit -m "Sorteos QR"
+git branch -M main
+git remote add origin https://github.com/TU-USUARIO/TU-REPO.git
+git push -u origin main
+```
+
+(Si el repo ya existe con archivos viejos: `git push -u origin main --force`.)
+
+## 2. Desplegarlo en Render
 
 1. **Base de datos (gratis):** creá un cluster en [MongoDB Atlas](https://www.mongodb.com/atlas), un usuario de base de datos y, en *Network Access*, permití `0.0.0.0/0`. Copiá la cadena de conexión (`mongodb+srv://...`).
 2. **GitHub:** subí esta carpeta a un repositorio.
