@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Sorteos · Admin</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="bar"><a href="#/" class="brand">Sorteos</a><button id="logout" class="ghost small" hidden>Salir</button></header>
+<main id="app" class="wrap"></main>
+<div id="overlay" class="overlay" hidden></div>
+<div id="toast" class="toast" role="status"></div>
+<script>
+const $ = s => document.querySelector(s);
+const app = $('#app');
+const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = d => new Date(d).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
+let authed = false;
+
+function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2200); }
+
+async function api(url, opts = {}) {
+  const r = await fetch(url, { credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401 && !url.includes('login')) { showLogin(); throw new Error('Tu sesión venció. Ingresá de nuevo.'); }
+  if (!r.ok) throw new Error(d.error || 'Ocurrió un error');
+  return d;
+}
+
+function showLogin() {
+  authed = false; $('#logout').hidden = true;
+  app.innerHTML = `<form class="card narrow" id="lf"><h1>Ingresar</h1>
+    <label>Contraseña<input type="password" name="p" required autofocus autocomplete="current-password"></label>
+    <button class="btn" style="width:100%">Entrar</button><p class="err" id="le" role="alert"></p></form>`;
+  $('#lf').onsubmit = async e => {
+    e.preventDefault();
+    try { await api('/api/admin/login', { method: 'POST', body: { password: e.target.p.value } }); authed = true; route(); }
+    catch (x) { $('#le').textContent = x.message; }
+  };
+}
+
+async function list() {
+  const rs = await api('/api/admin/raffles');
+  app.innerHTML = `<div class="head"><h1>Tus sorteos</h1></div>
+    <details class="card" ${rs.length ? '' : 'open'}><summary>Crear sorteo nuevo</summary>
+      <form id="nf" class="grid">
+        <label>Nombre<input name="name" required maxlength="100" placeholder="Sorteo de fin de año"></label>
+        <label>Premio<input name="prize" maxlength="100"></label>
+        <label>Cantidad de ganadores<input name="winnersCount" type="number" min="1" max="100" value="1"></label>
+        <label class="full">Descripción (opcional)<textarea name="description" maxlength="300" rows="2"></textarea></label>
+        <button class="btn">Crear y generar QR</button>
+      </form></details>
+    ${rs.length ? '' : '<p class="muted">Todavía no creaste ningún sorteo.</p>'}
+    <div class="rows">${rs.map(r => `<a class="row" href="#/r/${r._id}"><strong>${h(r.name)}</strong>
+      <span class="chip ${r.open ? 'on' : ''}">${r.open ? 'Abierto' : r.drawnAt ? 'Sorteado' : 'Cerrado'}</span>
+      <span>${r.participants} inscriptos</span></a>`).join('')}</div>`;
+  $('#nf').onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      const { id } = await api('/api/admin/raffles', { method: 'POST', body: { name: f.name.value, prize: f.prize.value, winnersCount: f.winnersCount.value, description: f.description.value } });
+      location.hash = '#/r/' + id;
+    } catch (x) { toast(x.message); }
+  };
+}
+
+async function detail(id) {
+  const { raffle: r, participants: ps, joinUrl, qr } = await api('/api/admin/raffles/' + id);
+  const winners = ps.filter(p => p.winnerOrder != null).sort((a, b) => a.winnerOrder - b.winnerOrder);
+  const left = ps.length - winners.length;
+  const base = '/api/admin/raffles/' + id;
+  app.innerHTML = `<a class="back" href="#/">‹ Todos los sorteos</a>
+    <div class="head"><div><h1>${h(r.name)}</h1><p class="muted">${r.prize ? 'Premio: ' + h(r.prize) : ''}</p></div>
+      <span class="chip ${r.open ? 'on' : ''}">${r.open ? 'Inscripción abierta' : 'Inscripción cerrada'}</span></div>
+    <div class="cols">
+      <section class="card qr">
+        <div class="qrbox">${qr}</div>
+        <input readonly value="${h(joinUrl)}" aria-label="Link de inscripción">
+        <div class="actions"><button class="ghost" id="copy">Copiar link</button><a class="ghost" href="${base}/qr.png" download="qr-${h(r.code)}.png">Descargar QR</a></div>
+        <button class="btn alt" id="toggle">${r.open ? 'Cerrar inscripciones' : 'Reabrir inscripciones'}</button>
+      </section>
+      <section>
+        <div class="card draw">
+          <label>Ganadores a sortear<input id="cnt" type="number" min="1" max="${Math.max(left, 1)}" value="${Math.min(r.winnersCount, Math.max(left, 1))}"></label>
+          <button class="btn" id="draw" ${left ? '' : 'disabled'}>Sortear</button>
+        </div>
+        ${winners.length ? `<div class="card winners"><h2>Ganadores</h2><ol>${winners.map(w => `<li>${h(w.name)}<small>${h(w.contact)}</small></li>`).join('')}</ol></div>` : ''}
+        <div class="card"><h2>Inscriptos (${ps.length})</h2>
+          ${ps.length ? `<div class="tablewrap"><table><thead><tr><th>Nombre</th><th>Contacto</th><th>Hora</th><th></th></tr></thead><tbody>
+            ${ps.map(p => `<tr><td>${h(p.name)} ${p.winnerOrder ? `<span class="chip win">Ganador #${p.winnerOrder}</span>` : ''}</td><td>${h(p.contact)}</td><td>${fmt(p.createdAt)}</td>
+            <td><button class="ghost small danger" data-del="${p._id}" aria-label="Quitar a ${h(p.name)}">Quitar</button></td></tr>`).join('')}</tbody></table></div>`
+          : '<p class="muted">Todavía no hay inscriptos. Compartí el QR para empezar.</p>'}
+        </div>
+        <div class="foot">
+          <a class="ghost" href="${base}/export.csv">Exportar CSV</a>
+          ${winners.length ? '<button class="ghost" id="reset">Reiniciar sorteo</button>' : ''}
+          <button class="ghost danger" id="rm">Eliminar sorteo</button>
+        </div>
+      </section>
+    </div>`;
+
+  const act = (el, fn) => { el.onclick = async () => { try { await fn(); } catch (x) { toast(x.message); } }; };
+  act($('#copy'), async () => { await navigator.clipboard.writeText(joinUrl); toast('Link copiado'); });
+  act($('#toggle'), async () => { await api(base, { method: 'PATCH', body: { open: !r.open } }); detail(id); });
+  act($('#draw'), async () => {
+    $('#draw').disabled = true;
+    try {
+      const { winners: w } = await api(base + '/draw', { method: 'POST', body: { count: +$('#cnt').value } });
+      await animate(ps.filter(p => p.winnerOrder == null).map(p => p.name), w);
+      detail(id);
+    } catch (x) { $('#draw').disabled = false; throw x; }
+  });
+  if ($('#reset')) act($('#reset'), async () => { if (confirm('¿Reiniciar el sorteo? Se borran los ganadores actuales.')) { await api(base + '/reset-draw', { method: 'POST' }); detail(id); } });
+  act($('#rm'), async () => { if (confirm('¿Eliminar este sorteo y todos sus inscriptos?')) { await api(base, { method: 'DELETE' }); location.hash = '#/'; } });
+  document.querySelectorAll('[data-del]').forEach(b => act(b, async () => { await api(`${base}/participants/${b.dataset.del}`, { method: 'DELETE' }); detail(id); }));
+}
+
+function animate(names, w) {
+  return new Promise(done => {
+    const o = $('#overlay'); o.hidden = false;
+    const finish = () => {
+      o.innerHTML = `<div class="ov"><p>${w.length > 1 ? 'Ganadores' : 'Ganador'}</p><ol>${w.map(x => `<li>${h(x.name)}</li>`).join('')}</ol><button class="btn" id="ok">Listo</button></div>`;
+      $('#ok').onclick = () => { o.hidden = true; done(); };
+    };
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return finish();
+    o.innerHTML = '<div class="ov"><p>Sorteando…</p><div class="spin" id="spin"></div></div>';
+    let n = 0;
+    const iv = setInterval(() => {
+      $('#spin').textContent = names[Math.floor(Math.random() * names.length)];
+      if (++n >= 30) { clearInterval(iv); finish(); }
+    }, 100);
+  });
+}
+
+async function route() {
+  if (!authed) {
+    try { authed = (await api('/api/admin/me')).admin; } catch { authed = false; }
+    if (!authed) return showLogin();
+  }
+  $('#logout').hidden = false;
+  const m = location.hash.match(/^#\/r\/([a-f0-9]{24})$/);
+  try { await (m ? detail(m[1]) : list()); } catch (x) { if (authed) app.innerHTML = `<p class="err">${h(x.message)}</p>`; }
+}
+$('#logout').onclick = async () => { await api('/api/admin/logout', { method: 'POST' }); showLogin(); };
+addEventListener('hashchange', route);
+route();
+</script>
+</body>
+</html>

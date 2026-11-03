@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Inscribite al sorteo</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main class="ticket-wrap"><article class="ticket" id="t"><div class="stub"><p class="muted">Cargando…</p></div></article></main>
+<script>
+const code = location.pathname.split('/')[2];
+const t = document.getElementById('t');
+const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const head = r => `<div class="ticket-top"><h1>${h(r.name)}</h1>${r.prize ? `<p>Premio: ${h(r.prize)}</p>` : ''}</div>`;
+const simple = (r, msg) => `${head(r)}<div class="stub"><p>${msg}</p></div>`;
+
+(async () => {
+  const res = await fetch('/api/public/' + code);
+  if (!res.ok) { t.innerHTML = '<div class="stub"><h1>Sorteo no encontrado</h1><p class="muted">Revisá que el código QR sea el correcto.</p></div>'; return; }
+  const r = await res.json();
+  document.title = r.name;
+  if (!r.open) { t.innerHTML = simple(r, 'Las inscripciones de este sorteo están cerradas.'); return; }
+
+  t.innerHTML = `${head(r)}
+    ${r.description ? `<div class="ticket-body"><p>${h(r.description)}</p></div>` : ''}
+    <div class="perf"></div>
+    <div class="stub"><form id="f" novalidate>
+      <label>Nombre y apellido<input name="name" autocomplete="name" required maxlength="80"></label>
+      <label>Email o teléfono<input name="contact" autocomplete="email" required maxlength="120"></label>
+      <button class="btn" id="b">Participar</button>
+      <p class="err" id="e" role="alert"></p>
+    </form></div>`;
+
+  document.getElementById('f').onsubmit = async ev => {
+    ev.preventDefault();
+    const b = document.getElementById('b'), e = document.getElementById('e');
+    e.textContent = ''; b.disabled = true;
+    try {
+      const res = await fetch(`/api/public/${code}/join`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: ev.target.name.value, contact: ev.target.contact.value }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'No se pudo completar la inscripción.');
+      t.innerHTML = `${head(r)}<div class="stub ok"><strong>¡Listo, ${h(d.name)}!</strong><p class="muted">Ya estás participando. Si ganás, te vamos a contactar.</p></div>`;
+    } catch (x) { e.textContent = x.message; b.disabled = false; }
+  };
+})().catch(() => { t.innerHTML = '<div class="stub"><p class="err">No se pudo cargar el sorteo. Probá de nuevo.</p></div>'; });
+</script>
+</body>
+</html>
